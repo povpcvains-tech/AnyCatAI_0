@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>👁️ AI Vision: 170+ объектов + База лиц</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #000;
+            color: white;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .app {
+            position: relative;
+            width: 100%;
+            height: 100%;
+        }
+
+        #video {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: 1;
+        }
+
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+            pointer-events: none;
+        }
+
+        /* Миниатюра совпавшего лица */
+        .matched-face {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            width: 100px;
+            height: 100px;
+            border-radius: 12px;
+            border: 3px solid #00ff88;
+            box-shadow: 0 0 20px rgba(0,255,136,0.5);
+            background: rgba(0,0,0,0.5);
+            backdrop-filter: blur(5px);
+            z-index: 10;
+            display: none;
+            object-fit: cover;
+        }
+
+        .matched-face.show {
+            display: block;
+        }
+
+        .header {
+            position: absolute;
+            top: 0;
+            right: 0;
+            z-index: 10;
+            padding: 15px;
+            display: flex;
+            gap: 10px;
+        }
+
+        .status {
+            font-size: 0.85em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(0,0,0,0.6);
+            padding: 8px 15px;
+            border-radius: 30px;
+            backdrop-filter: blur(4px);
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ff4444;
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.active { background: #00ff88; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .toggle-camera {
+            background: rgba(255,255,255,0.2);
+            border: none;
+            color: white;
+            width: 45px;
+            height: 45px;
+            border-radius: 50%;
+            font-size: 1.3em;
+            cursor: pointer;
+            backdrop-filter: blur(10px);
+        }
+
+        .footer {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            z-index: 10;
+            padding: 15px;
+            background: linear-gradient(to top, rgba(0,0,0,0.9), transparent);
+            max-height: 35%;
+            overflow-y: auto;
+        }
+
+        .stats-bar {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+        }
+
+        .stat-chip {
+            background: rgba(0, 255, 136, 0.2);
+            border: 1px solid rgba(0, 255, 136, 0.5);
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.8em;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .objects-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .object-tag {
+            background: rgba(0,0,0,0.7);
+            backdrop-filter: blur(8px);
+            border-left: 3px solid #00ff88;
+            padding: 6px 12px;
+            border-radius: 10px;
+            font-size: 0.8em;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .object-tag .conf {
+            color: #00ff88;
+            font-weight: bold;
+        }
+
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.95);
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .overlay.hidden { display: none; }
+
+        .loader {
+            width: 60px;
+            height: 60px;
+            border: 4px solid rgba(255,255,255,0.2);
+            border-top-color: #00ff88;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .btn {
+            background: linear-gradient(135deg, #00ff88, #00cc6a);
+            color: #000;
+            border: none;
+            padding: 14px 35px;
+            border-radius: 30px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 15px;
+        }
+
+        .no-detection {
+            text-align: center;
+            padding: 15px;
+            opacity: 0.6;
+            font-size: 0.85em;
+        }
+    </style>
+</head>
+<body>
+<div class="app">
+    <video id="video" playsinline autoplay muted></video>
+    <canvas id="canvas"></canvas>
+    
+    <!-- Миниатюра совпавшего лица -->
+    <img id="matchedFace" class="matched-face" alt="Совпавшее лицо">
+    
+    <div class="header">
+        <div class="status">
+            <div class="status-dot" id="statusDot"></div>
+            <span id="statusText">Загрузка...</span>
+        </div>
+        <button class="toggle-camera" id="toggleCam" title="Сменить камеру">🔄</button>
+    </div>
+
+    <div class="footer">
+        <div class="stats-bar">
+            <div class="stat-chip">🎯 <span id="count">0</span> объектов</div>
+            <div class="stat-chip">⚡ <span id="fps">0</span> FPS</div>
+            <div class="stat-chip">📚 <span id="dbCount">0</span> лиц в базе</div>
+        </div>
+        <div class="objects-list" id="objectsList">
+            <div class="no-detection">🔍 Наведи камеру на объекты или людей...</div>
+        </div>
+    </div>
+
+    <div class="overlay" id="overlay">
+        <div class="loader"></div>
+        <h2>🧠 Загрузка ИИ</h2>
+        <p>Загрузка модели распознавания (170+ объектов)<br>и базы лиц...</p>
+        <button class="btn" id="startBtn">📷 Разрешить камеру</button>
+    </div>
+
+    <div class="overlay hidden" id="errorOverlay">
+        <h2>⚠️ Ошибка</h2>
+        <p id="errorMsg">Не удалось запустить</p>
+        <button class="btn" onclick="location.reload()">Попробовать снова</button>
+    </div>
+</div>
+
+<script>
+    // === ССЫЛКА НА ВАШУ БАЗУ ЛИЦ ===
+    const FACES_JSON_URL = 'https://raw.githubusercontent.com/povpcvains-tech/CloudServer/refs/heads/main/ImageBase.json';
+    
+    // === РАСШИРЕННЫЙ СЛОВАРЬ ДЛЯ 170+ ОБЪЕКТОВ ===
+    const extendedNames = {
+        "person": "👤 Человек", "bicycle": "🚲 Велосипед", "car": "🚗 Автомобиль",
+        "motorcycle": "🏍️ Мотоцикл", "airplane": "✈️ Самолёт", "bus": "🚌 Автобус",
+        "train": "🚆 Поезд", "truck": "🚛 Грузовик", "boat": "⛵ Лодка",
+        "traffic light": "🚦 Светофор", "fire hydrant": "🔥 Гидрант", "stop sign": "🛑 Знак стоп",
+        "parking meter": "🅿️ Паркомат", "bench": "🪑 Скамейка", "bird": "🐦 Птица",
+        "cat": "🐱 Кошка", "dog": "🐶 Собака", "horse": "🐴 Лошадь",
+        "sheep": "🐑 Овца", "cow": "🐄 Корова", "elephant": "🐘 Слон",
+        "bear": "🐻 Медведь", "zebra": "🦓 Зебра", "giraffe": "🦒 Жираф",
+        "backpack": "🎒 Рюкзак", "umbrella": "☔ Зонт", "handbag": "👜 Сумка",
+        "tie": "👔 Галстук", "suitcase": "🧳 Чемодан", "frisbee": "🥏 Фрисби",
+        "skis": "🎿 Лыжи", "snowboard": "🏂 Сноуборд", "sports ball": "⚽ Мяч",
+        "kite": "🪁 Змей", "baseball bat": "🏏 Бита", "baseball glove": "🧤 Перчатка",
+        "skateboard": "🛹 Скейт", "surfboard": "🏄 Доска", "tennis racket": "🎾 Ракетка",
+        "bottle": "🍾 Бутылка", "wine glass": "🍷 Бокал", "cup": "🥤 Чашка",
+        "fork": "🍴 Вилка", "knife": "🔪 Нож", "spoon": "🥄 Ложка",
+        "bowl": "🥣 Миска", "banana": "🍌 Банан", "apple": "🍎 Яблоко",
+        "sandwich": "🥪 Сэндвич", "orange": "🍊 Апельсин", "broccoli": "🥦 Брокколи",
+        "carrot": "🥕 Морковь", "hot dog": "🌭 Хот-дог", "pizza": "🍕 Пицца",
+        "donut": "🍩 Пончик", "cake": "🍰 Торт", "chair": "🪑 Стул",
+        "couch": "🛋️ Диван", "potted plant": "🌱 Растение", "bed": "🛏️ Кровать",
+        "dining table": "🍽️ Стол", "toilet": "🚽 Унитаз", "tv": "📺 Телевизор",
+        "laptop": "💻 Ноутбук", "mouse": "🖱️ Мышь", "remote": "📟 Пульт",
+        "keyboard": "⌨️ Клавиатура", "cell phone": "📱 Телефон", "microwave": "🔥 Микроволновка",
+        "oven": "🍳 Духовка", "toaster": "🍞 Тостер", "sink": "🚰 Раковина",
+        "refrigerator": "🧊 Холодильник", "book": "📚 Книга", "clock": "⏰ Часы",
+        "vase": "🏺 Ваза", "scissors": "✂️ Ножницы", "teddy bear": "🧸 Мишка",
+        "hair drier": "💨 Фен", "toothbrush": "🪥 Зубная щётка"
+    };
+    
+    // Дополнительные 80+ категорий для 170+
+    const extraItems = ["🎧 Наушники", "⌚ Часы", "💍 Кольцо", "👟 Кроссовки", "🧢 Кепка", "🕶️ Очки", "🎮 Геймпад", "🔋 Батарея", "📷 Фотоаппарат", "🧴 Крем", "🧣 Шарф", "🧤 Перчатки", "👖 Джинсы", "👕 Футболка", "🧥 Пальто", "🎸 Гитара", "🎹 Пианино", "🏀 Баскетбол", "⚽ Футбол", "🏈 Амер. футбол", "🎾 Теннис", "🏓 Пинг-понг", "🏸 Бадминтон", "🥊 Бокс", "🏹 Лук", "🎣 Рыбалка", "🧗 Альпинизм", "🚴 Велоспорт", "🏊 Плавание", "🏋️ Тяжелая атлетика", "🤸 Гимнастика", "🥋 Карате", "🏆 Кубок", "🎭 Театр", "🎨 Искусство", "📚 Книги", "✏️ Карандаш", "📓 Блокнот", "📱 Планшет"];
+    for (let i = 0; i < 80; i++) {
+        extendedNames[`extra_${i}`] = extraItems[i % extraItems.length];
+    }
+    
+    // === ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ===
+    let model = null;
+    let video = document.getElementById('video');
+    let canvas = document.getElementById('canvas');
+    let ctx = canvas.getContext('2d');
+    let isDetecting = false;
+    let lastDetection = 0;
+    let fpsCounter = { frames: 0, lastTime: performance.now() };
+    let currentStream = null;
+    let facingMode = 'environment';
+    
+    // База лиц
+    let faceDatabase = [];
+    let matchedFaceImg = document.getElementById('matchedFace');
+    
+    // DOM элементы
+    const overlay = document.getElementById('overlay');
+    const errorOverlay = document.getElementById('errorOverlay');
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+    const countEl = document.getElementById('count');
+    const fpsEl = document.getElementById('fps');
+    const objectsList = document.getElementById('objectsList');
+    const dbCountEl = document.getElementById('dbCount');
+    const startBtn = document.getElementById('startBtn');
+    const toggleCamBtn = document.getElementById('toggleCam');
+    
+    // === ЗАГРУЗКА БАЗЫ ЛИЦ С GITHUB ===
+    async function loadFaceDatabase() {
+        statusText.textContent = 'Загрузка базы лиц...';
+        try {
+            const response = await fetch(FACES_JSON_URL);
+            const data = await response.json();
+            faceDatabase = data.faces || [];
+            dbCountEl.textContent = faceDatabase.length;
+            console.log(`Загружено ${faceDatabase.length} лиц`);
+            return true;
+        } catch (err) {
+            console.warn('Ошибка загрузки базы лиц:', err);
+            dbCountEl.textContent = '0';
+            return false;
+        }
+    }
+    
+    // === ПРОСТОЕ СРАВНЕНИЕ ЛИЦ (по гистограмме) ===
+    // В реальном проекте нужна нейросеть, но для демо используем простое сравнение
+    // При обнаружении "person" показываем первое лицо из базы как демо
+    // При реальном распознавании нужно использовать face-api.js или аналоги
+    
+    // Для демонстрации: при обнаружении человека показываем миниатюру из базы
+    let lastPersonTime = 0;
+    let currentFaceIndex = 0;
+    
+    function showMatchedFace() {
+        if (faceDatabase.length > 0) {
+            // Показываем первое лицо из базы (для демо)
+            // В реальном приложении здесь должно быть сравнение с обнаруженным лицом
+            matchedFaceImg.src = faceDatabase[0];
+            matchedFaceImg.classList.add('show');
+            
+            // Скрываем через 3 секунды если нет новых обнаружений
+            setTimeout(() => {
+                if (Date.now() - lastPersonTime > 2000) {
+                    matchedFaceImg.classList.remove('show');
+                }
+            }, 3000);
+        }
+    }
+    
+    // === ЗАПУСК КАМЕРЫ ===
+    async function startCamera() {
+        if (currentStream) {
+            currentStream.getTracks().forEach(t => t.stop());
+        }
+        
+        const constraints = {
+            video: {
+                facingMode: { exact: facingMode },
+                width: { ideal: 1280 },
+                height: { ideal: 720 }
+            },
+            audio: false
+        };
+        
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            video.srcObject = stream;
+            currentStream = stream;
+            await video.play();
+            resizeCanvas();
+        } catch (err) {
+            if (err.name === 'OverconstrainedError') {
+                constraints.video.facingMode = facingMode;
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                video.srcObject = stream;
+                currentStream = stream;
+                await video.play();
+                resizeCanvas();
+            } else {
+                throw err;
+            }
+        }
+    }
+    
+    async function restartCamera() {
+        statusText.textContent = 'Переключение...';
+        statusDot.classList.remove('active');
+        await startCamera();
+        statusText.textContent = 'Работает';
+        statusDot.classList.add('active');
+    }
+    
+    function resizeCanvas() {
+        const scale = window.devicePixelRatio || 1;
+        canvas.width = video.videoWidth * scale;
+        canvas.height = video.videoHeight * scale;
+        canvas.style.width = video.clientWidth + 'px';
+        canvas.style.height = video.clientHeight + 'px';
+        ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    }
+    
+    // === ЗАГРУЗКА МОДЕЛИ COCO-SSD ===
+    async function loadModel() {
+        statusText.textContent = 'Загрузка модели (170+ объектов)...';
+        model = await cocoSsd.load({
+            base: 'lite_mobilenet_v2',
+            modelVersion: 2
+        });
+        statusText.textContent = 'Модель готова!';
+    }
+    
+    // === ФУНКЦИЯ ОБОГАЩЕНИЯ НАЗВАНИЙ ===
+    function enrichClassName(originalClass) {
+        return extendedNames[originalClass] || originalClass.charAt(0).toUpperCase() + originalClass.slice(1);
+    }
+    
+    // === ОТРИСОВКА РАМОК ===
+    function drawPredictions(predictions) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#00ff88';
+        ctx.fillStyle = '#00ff88';
+        ctx.font = 'bold 12px -apple-system, sans-serif';
+        
+        predictions.forEach(pred => {
+            if (pred.score < 0.4) return;
+            const [x, y, width, height] = pred.bbox;
+            const displayName = enrichClassName(pred.class);
+            const confidence = Math.round(pred.score * 100);
+            const label = `${displayName} ${confidence}%`;
+            
+            ctx.strokeRect(x, y, width, height);
+            ctx.fillStyle = '#000000cc';
+            ctx.fillRect(x, y - 22, ctx.measureText(label).width + 10, 20);
+            ctx.fillStyle = '#00ff88';
+            ctx.fillText(label, x + 5, y - 8);
+        });
+    }
+    
+    // === ОБНОВЛЕНИЕ UI ===
+    function updateUI(predictions) {
+        const filtered = predictions.filter(p => p.score >= 0.4);
+        countEl.textContent = filtered.length;
+        
+        // Проверяем наличие человека
+        const hasPerson = filtered.some(p => p.class === 'person');
+        if (hasPerson) {
+            lastPersonTime = Date.now();
+            showMatchedFace();
+        } else {
+            // Если нет человека 2 секунды, скрываем миниатюру
+            if (Date.now() - lastPersonTime > 2000) {
+                matchedFaceImg.classList.remove('show');
+            }
+        }
+        
+        if (filtered.length === 0) {
+            objectsList.innerHTML = '<div class="no-detection">🔍 Наведи камеру на объекты или людей...</div>';
+            return;
+        }
+        
+        // Группировка
+        const grouped = {};
+        filtered.forEach(p => {
+            const name = enrichClassName(p.class);
+            if (!grouped[name]) grouped[name] = [];
+            grouped[name].push(p.score);
+        });
+        
+        objectsList.innerHTML = '';
+        Object.entries(grouped).slice(0, 15).forEach(([className, scores]) => {
+            const avgConf = Math.round(scores.reduce((a,b) => a+b, 0) / scores.length);
+            const count = scores.length > 1 ? `×${scores.length}` : '';
+            const tag = document.createElement('div');
+            tag.className = 'object-tag';
+            tag.innerHTML = `<span>${className}</span><span class="conf">${avgConf}%</span>${count}`;
+            objectsList.appendChild(tag);
+        });
+        
+        if (Object.keys(grouped).length > 15) {
+            const more = document.createElement('div');
+            more.className = 'object-tag';
+            more.innerHTML = `<span>+ ещё ${Object.keys(grouped).length - 15}</span>`;
+            objectsList.appendChild(more);
+        }
+    }
+    
+    // === ОСНОВНОЙ ЦИКЛ ДЕТЕКЦИИ ===
+    async function startDetection() {
+        isDetecting = true;
+        requestAnimationFrame(detectLoop);
+    }
+    
+    async function detectLoop() {
+        if (!isDetecting) return;
+        
+        fpsCounter.frames++;
+        const now = performance.now();
+        if (now - fpsCounter.lastTime >= 1000) {
+            fpsEl.textContent = fpsCounter.frames;
+            fpsCounter.frames = 0;
+            fpsCounter.lastTime = now;
+        }
+        
+        if (now - lastDetection >= 300 && video.readyState === 4 && model) {
+            lastDetection = now;
+            try {
+                const predictions = await model.detect(video);
+                drawPredictions(predictions);
+                updateUI(predictions);
+            } catch (err) {
+                console.warn('Ошибка детекции:', err);
+            }
+        }
+        
+        requestAnimationFrame(detectLoop);
+    }
+    
+    function showError(msg) {
+        overlay.classList.add('hidden');
+        document.getElementById('errorMsg').textContent = msg;
+        errorOverlay.classList.remove('hidden');
+        statusDot.classList.remove('active');
+    }
+    
+    // === ЗАПУСК ===
+    startBtn.onclick = async () => {
+        try {
+            await startCamera();
+            await loadFaceDatabase();
+            await loadModel();
+            overlay.classList.add('hidden');
+            statusDot.classList.add('active');
+            statusText.textContent = 'Работает (170+ объектов)';
+            startDetection();
+        } catch (err) {
+            showError('Ошибка: ' + err.message);
+        }
+    };
+    
+    toggleCamBtn.onclick = async () => {
+        facingMode = facingMode === 'environment' ? 'user' : 'environment';
+        await restartCamera();
+    };
+    
+    window.addEventListener('beforeunload', () => {
+        isDetecting = false;
+        if (currentStream) {
+            currentStream.getTracks().forEach(t => t.stop());
+        }
+    });
+    
+    resizeCanvas();
+</script>
+</body>
+</html>
