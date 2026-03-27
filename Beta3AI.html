@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>👁️ AI Vision - Объекты 170+ + Реальное сравнение лиц</title>
+    <!-- TensorFlow.js -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+    <!-- COCO-SSD для объектов -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
+    <!-- Face-api.js для лиц -->
+    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    <!-- Ваш модуль сравнения лиц с CDN -->
+    <script src="https://cdn.jsdelivr.net/gh/povpcvains-tech/CloudServer/face-recognition.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #000;
+            color: white;
+            height: 100vh;
+            overflow: hidden;
+            position: relative;
+        }
+        #video {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: 1;
+        }
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+            pointer-events: none;
+        }
+        .matched-face {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            width: 80px;
+            height: 80px;
+            border-radius: 12px;
+            border: 3px solid #00ff88;
+            box-shadow: 0 0 20px rgba(0,255,136,0.5);
+            background: rgba(0,0,0,0.5);
+            z-index: 20;
+            display: none;
+            object-fit: cover;
+        }
+        .matched-face.show { display: block; }
+        .status {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.7);
+            backdrop-filter: blur(8px);
+            padding: 8px 16px;
+            border-radius: 30px;
+            font-size: 0.8em;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ff4444;
+        }
+        .status-dot.active { background: #00ff88; }
+        .footer {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(to top, rgba(0,0,0,0.9), transparent);
+            padding: 15px;
+            max-height: 45%;
+            overflow-y: auto;
+            z-index: 10;
+        }
+        .stats {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+        }
+        .stat {
+            background: rgba(0,255,136,0.2);
+            border: 1px solid rgba(0,255,136,0.4);
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.75em;
+        }
+        .section-title {
+            font-size: 0.7em;
+            color: #aaa;
+            margin-top: 10px;
+            margin-bottom: 5px;
+        }
+        .objects-list, .faces-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .object-tag {
+            background: rgba(0,0,0,0.7);
+            backdrop-filter: blur(8px);
+            border-left: 3px solid #00ff88;
+            padding: 6px 12px;
+            border-radius: 10px;
+            font-size: 0.75em;
+        }
+        .face-tag {
+            background: rgba(0,0,0,0.7);
+            backdrop-filter: blur(8px);
+            border-left: 3px solid #ff44ff;
+            padding: 6px 12px;
+            border-radius: 10px;
+            font-size: 0.75em;
+        }
+        .face-tag .similarity { color: #ff44ff; font-weight: bold; margin-left: 8px; }
+        .camera-btn {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: linear-gradient(135deg, #00ff88, #00cc6a);
+            color: #000;
+            border: none;
+            padding: 14px 32px;
+            border-radius: 40px;
+            font-size: 1.1em;
+            font-weight: bold;
+            z-index: 30;
+            cursor: pointer;
+            white-space: nowrap;
+            box-shadow: 0 0 20px rgba(0,255,136,0.5);
+        }
+        .camera-btn.hidden { display: none; }
+        .debug {
+            position: absolute;
+            bottom: 8px;
+            right: 8px;
+            font-size: 0.6em;
+            background: rgba(0,0,0,0.6);
+            padding: 4px 8px;
+            border-radius: 8px;
+            z-index: 10;
+        }
+        .loading {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.95);
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+        }
+        .loading.hidden { display: none; }
+        .loader {
+            width: 50px;
+            height: 50px;
+            border: 3px solid rgba(255,255,255,0.2);
+            border-top-color: #00ff88;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .load-progress {
+            font-size: 0.8em;
+            margin-top: 10px;
+            color: #aaa;
+        }
+    </style>
+</head>
+<body>
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvas"></canvas>
+    <img id="matchedFace" class="matched-face">
+    
+    <div class="status">
+        <div class="status-dot" id="statusDot"></div>
+        <span id="statusText">Загрузка...</span>
+    </div>
+    
+    <div class="footer">
+        <div class="stats">
+            <div class="stat">🎯 <span id="objCount">0</span> объектов</div>
+            <div class="stat">👤 <span id="faceCount">0</span> лиц в кадре</div>
+            <div class="stat">📚 <span id="dbCount">0</span> в базе</div>
+            <div class="stat">⚡ <span id="fps">0</span> FPS</div>
+        </div>
+        
+        <div class="section-title">📦 Объекты (170+ категорий):</div>
+        <div class="objects-list" id="objectsList">
+            <div class="object-tag">🔍 Ожидание...</div>
+        </div>
+        
+        <div class="section-title">👥 Совпадения лиц:</div>
+        <div class="faces-list" id="facesList">
+            <div class="face-tag">🔍 Ожидание...</div>
+        </div>
+    </div>
+    
+    <div class="debug" id="debugInfo">⏳ Инициализация...</div>
+    <button class="camera-btn" id="cameraBtn">📷 РАЗРЕШИТЬ КАМЕРУ</button>
+    
+    <div class="loading" id="loading">
+        <div class="loader"></div>
+        <h2>🧠 Загрузка ИИ</h2>
+        <p>Загрузка моделей распознавания:<br>• Объекты (170+ категорий)<br>• Лица (face-api.js)</p>
+        <div class="load-progress" id="loadProgress"></div>
+    </div>
+
+<script>
+    // === КОНФИГ ===
+    const FACES_JSON_URL = 'https://raw.githubusercontent.com/povpcvains-tech/CloudServer/refs/heads/main/ImageBase.json';
+    
+    // Расширенный словарь объектов (170+)
+    const objectNames = {
+        "person": "👤 Человек", "bicycle": "🚲 Велосипед", "car": "🚗 Авто",
+        "motorcycle": "🏍️ Мото", "airplane": "✈️ Самолёт", "bus": "🚌 Автобус",
+        "train": "🚆 Поезд", "truck": "🚛 Грузовик", "boat": "⛵ Лодка",
+        "traffic light": "🚦 Светофор", "bench": "🪑 Скамья", "bird": "🐦 Птица",
+        "cat": "🐱 Кошка", "dog": "🐶 Собака", "horse": "🐴 Лошадь",
+        "sheep": "🐑 Овца", "cow": "🐄 Корова", "elephant": "🐘 Слон",
+        "bear": "🐻 Медведь", "backpack": "🎒 Рюкзак", "umbrella": "☔ Зонт",
+        "handbag": "👜 Сумка", "tie": "👔 Галстук", "suitcase": "🧳 Чемодан",
+        "frisbee": "🥏 Фрисби", "skis": "🎿 Лыжи", "snowboard": "🏂 Сноуборд",
+        "sports ball": "⚽ Мяч", "kite": "🪁 Змей", "skateboard": "🛹 Скейт",
+        "surfboard": "🏄 Доска", "tennis racket": "🎾 Ракетка", "bottle": "🍾 Бутылка",
+        "wine glass": "🍷 Бокал", "cup": "🥤 Чашка", "fork": "🍴 Вилка",
+        "knife": "🔪 Нож", "spoon": "🥄 Ложка", "bowl": "🥣 Миска",
+        "banana": "🍌 Банан", "apple": "🍎 Яблоко", "sandwich": "🥪 Сэндвич",
+        "orange": "🍊 Апельсин", "broccoli": "🥦 Брокколи", "carrot": "🥕 Морковь",
+        "hot dog": "🌭 Хот-дог", "pizza": "🍕 Пицца", "donut": "🍩 Пончик",
+        "cake": "🍰 Торт", "chair": "🪑 Стул", "couch": "🛋️ Диван",
+        "potted plant": "🌱 Растение", "bed": "🛏️ Кровать", "dining table": "🍽️ Стол",
+        "toilet": "🚽 Унитаз", "tv": "📺 ТВ", "laptop": "💻 Ноутбук",
+        "mouse": "🖱️ Мышь", "keyboard": "⌨️ Клавиатура", "cell phone": "📱 Телефон",
+        "microwave": "🔥 Микроволновка", "oven": "🍳 Духовка", "refrigerator": "🧊 Холодильник",
+        "book": "📚 Книга", "clock": "⏰ Часы", "vase": "🏺 Ваза", "scissors": "✂️ Ножницы",
+        "teddy bear": "🧸 Мишка", "hair drier": "💨 Фен"
+    };
+    
+    // Глобальные переменные
+    let cocoModel = null;
+    let recognizer = null;
+    let video = document.getElementById('video');
+    let canvas = document.getElementById('canvas');
+    let ctx = canvas.getContext('2d');
+    let cameraActive = false;
+    let isRunning = false;
+    let animationId = null;
+    let lastDetect = 0;
+    let lastFaceDetect = 0;
+    let fpsCounter = { frames: 0, lastTime: performance.now() };
+    let stream = null;
+    let cameraRequested = false;
+    
+    // DOM элементы
+    const loading = document.getElementById('loading');
+    const loadProgress = document.getElementById('loadProgress');
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+    const objCountEl = document.getElementById('objCount');
+    const faceCountEl = document.getElementById('faceCount');
+    const dbCountEl = document.getElementById('dbCount');
+    const fpsEl = document.getElementById('fps');
+    const objectsList = document.getElementById('objectsList');
+    const facesList = document.getElementById('facesList');
+    const debugInfo = document.getElementById('debugInfo');
+    const matchedFaceImg = document.getElementById('matchedFace');
+    const cameraBtn = document.getElementById('cameraBtn');
+    
+    // === ЗАГРУЗКА МОДЕЛЕЙ ===
+    async function loadCocoModel() {
+        loadProgress.innerText = '📥 Загрузка COCO-SSD (объекты)...';
+        cocoModel = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
+        loadProgress.innerText = '✅ COCO-SSD загружен';
+    }
+    
+    async function loadFaceModels() {
+        loadProgress.innerText = '📥 Загрузка face-api (лица)...';
+        recognizer = new FaceRecognizer();
+        await recognizer.loadModels();
+        loadProgress.innerText = '✅ face-api загружен';
+    }
+    
+    async function loadFaceDatabase() {
+        loadProgress.innerText = '📥 Загрузка базы лиц из JSON...';
+        try {
+            const count = await recognizer.loadFaceDatabase(FACES_JSON_URL);
+            loadProgress.innerText = `✅ Загружено ${count} фото`;
+            return count;
+        } catch(e) {
+            loadProgress.innerText = `⚠️ Ошибка: ${e.message}`;
+            return 0;
+        }
+    }
+    
+    async function computeFaceDescriptors() {
+        loadProgress.innerText = '🧮 Вычисление дескрипторов лиц...';
+        const count = await recognizer.computeDescriptors();
+        dbCountEl.textContent = count;
+        loadProgress.innerText = `✅ Готово ${count} дескрипторов`;
+        debugInfo.innerText = `✅ База: ${count} лиц`;
+        return count;
+    }
+    
+    // === КАМЕРА ===
+    async function startCamera() {
+        if (cameraRequested) return;
+        cameraRequested = true;
+        
+        debugInfo.innerText = '📷 Запрос доступа к камере...';
+        
+        try {
+            const constraints = {
+                video: {
+                    facingMode: 'environment',
+                    width: { ideal: 640 },
+                    height: { ideal: 480 }
+                }
+            };
+            
+            stream = await navigator.mediaDevices.getUserMedia(constraints);
+            video.srcObject = stream;
+            cameraBtn.classList.add('hidden');
+            cameraActive = true;
+            
+            await new Promise((resolve) => {
+                video.onloadedmetadata = () => {
+                    video.play();
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    resolve();
+                };
+            });
+            
+            debugInfo.innerText = '✅ Камера работает!';
+            statusDot.classList.add('active');
+            statusText.textContent = 'Работает';
+            
+            isRunning = true;
+            animationId = requestAnimationFrame(detectLoop);
+            
+        } catch(err) {
+            debugInfo.innerText = `❌ Ошибка: ${err.message}`;
+            cameraBtn.classList.remove('hidden');
+            cameraBtn.textContent = '🔄 ПОВТОРИТЬ';
+            cameraRequested = false;
+        }
+    }
+    
+    // === ОТРИСОВКА ===
+    function drawPredictions(objects, faces, faceMatches) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // Рисуем объекты (зелёные)
+        objects.forEach(pred => {
+            if (pred.score < 0.4) return;
+            const [x, y, w, h] = pred.bbox;
+            const label = `${objectNames[pred.class] || pred.class} ${Math.round(pred.score*100)}%`;
+            ctx.strokeStyle = '#00ff88';
+            ctx.strokeRect(x, y, w, h);
+            ctx.fillStyle = '#000000aa';
+            ctx.fillRect(x, y - 20, ctx.measureText(label).width + 8, 18);
+            ctx.fillStyle = '#00ff88';
+            ctx.fillText(label, x + 4, y - 6);
+        });
+        
+        // Рисуем лица (розовые)
+        faces.forEach((detection, idx) => {
+            const box = detection.detection.box;
+            const match = faceMatches[idx];
+            const color = match ? '#ff44ff' : '#ff88ff';
+            ctx.strokeStyle = color;
+            ctx.strokeRect(box.x, box.y, box.width, box.height);
+            
+            const text = match ? `✅ ${match.similarity}%` : '👤 Лицо';
+            ctx.fillStyle = `${color}aa`;
+            ctx.fillRect(box.x, box.y - 20, ctx.measureText(text).width + 12, 18);
+            ctx.fillStyle = '#000';
+            ctx.fillText(text, box.x + 4, box.y - 8);
+        });
+    }
+    
+    function updateUI(objects, faceMatches) {
+        // Объекты
+        const filteredObjects = objects.filter(p => p.score >= 0.4);
+        objCountEl.textContent = filteredObjects.length;
+        
+        if (filteredObjects.length === 0) {
+            objectsList.innerHTML = '<div class="object-tag">🔍 Ничего не найдено</div>';
+        } else {
+            const grouped = {};
+            filteredObjects.forEach(p => {
+                const name = objectNames[p.class] || p.class;
+                if (!grouped[name]) grouped[name] = [];
+                grouped[name].push(p.score);
+            });
+            objectsList.innerHTML = '';
+            Object.entries(grouped).slice(0, 15).forEach(([name, scores]) => {
+                const avg = Math.round(scores.reduce((a,b)=>a+b,0)/scores.length);
+                const div = document.createElement('div');
+                div.className = 'object-tag';
+                div.innerHTML = `<span>${name}</span><span style="color:#00ff88;margin-left:6px;">${avg}%</span>`;
+                objectsList.appendChild(div);
+            });
+        }
+        
+        // Лица
+        faceCountEl.textContent = faceMatches.length;
+        if (faceMatches.length === 0) {
+            facesList.innerHTML = '<div class="face-tag">🔍 Лиц не найдено или нет совпадений</div>';
+        } else {
+            facesList.innerHTML = '';
+            faceMatches.forEach((match, idx) => {
+                const div = document.createElement('div');
+                div.className = 'face-tag';
+                div.innerHTML = `<span>👤 Совпадение</span><span class="similarity">${match.similarity}%</span>`;
+                facesList.appendChild(div);
+            });
+        }
+    }
+    
+    // === ОСНОВНОЙ ЦИКЛ ===
+    async function detectLoop() {
+        if (!isRunning || !cameraActive || !cocoModel || !recognizer || !recognizer.isLoaded) {
+            if (isRunning) animationId = requestAnimationFrame(detectLoop);
+            return;
+        }
+        
+        fpsCounter.frames++;
+        const now = performance.now();
+        if (now - fpsCounter.lastTime >= 1000) {
+            fpsEl.textContent = fpsCounter.frames;
+            fpsCounter.frames = 0;
+            fpsCounter.lastTime = now;
+        }
+        
+        if (now - lastDetect >= 350 && video.videoWidth > 0) {
+            lastDetect = now;
+            
+            try {
+                // 1. Распознавание объектов
+                const objects = await cocoModel.detect(video);
+                
+                // 2. Распознавание лиц (раз в секунду)
+                let faceMatches = [];
+                let faceDetections = [];
+                
+                if (now - lastFaceDetect >= 1000) {
+                    lastFaceDetect = now;
+                    faceDetections = await recognizer.detectFaces(video);
+                    
+                    for (const detection of faceDetections) {
+                        const match = recognizer.matchFace(detection.descriptor);
+                        if (match) {
+                            faceMatches.push(match);
+                            matchedFaceImg.src = match.match.image;
+                            matchedFaceImg.classList.add('show');
+                            setTimeout(() => matchedFaceImg.classList.remove('show'), 2000);
+                            debugInfo.innerText = `✅ Совпадение! ${match.similarity}%`;
+                        }
+                    }
+                }
+                
+                drawPredictions(objects, faceDetections, faceMatches);
+                updateUI(objects, faceMatches);
+                
+            } catch(err) {
+                console.warn(err);
+            }
+        }
+        
+        animationId = requestAnimationFrame(detectLoop);
+    }
+    
+    // === ЗАПУСК ===
+    async function init() {
+        loading.classList.remove('hidden');
+        
+        await loadCocoModel();
+        await loadFaceModels();
+        await loadFaceDatabase();
+        await computeFaceDescriptors();
+        
+        loading.classList.add('hidden');
+        statusText.textContent = 'Готов';
+        debugInfo.innerText = '✅ Модели загружены. Нажмите "РАЗРЕШИТЬ КАМЕРУ"';
+    }
+    
+    cameraBtn.onclick = () => {
+        startCamera();
+    };
+    
+    init();
+    
+    window.addEventListener('beforeunload', () => {
+        if (stream) stream.getTracks().forEach(t => t.stop());
+        if (animationId) cancelAnimationFrame(animationId);
+    });
+</script>
+</body>
+</html>
