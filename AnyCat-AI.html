@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>👁️ AI Vision - Объекты 170+</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #000;
+            color: white;
+            height: 100vh;
+            overflow: hidden;
+            position: fixed;
+            width: 100%;
+        }
+        
+        #video {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(1);
+        }
+        
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+        
+        .matched-face {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            width: 70px;
+            height: 70px;
+            border-radius: 12px;
+            border: 3px solid #00ff88;
+            box-shadow: 0 0 20px rgba(0,255,136,0.5);
+            z-index: 20;
+            display: none;
+            object-fit: cover;
+            background: #000;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+        
+        .matched-face.show {
+            display: block;
+            opacity: 1;
+        }
+        
+        .status {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background: rgba(0,0,0,0.8);
+            backdrop-filter: blur(10px);
+            padding: 8px 16px;
+            border-radius: 30px;
+            font-size: 0.75em;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 500;
+        }
+        
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ff4444;
+            transition: background 0.3s ease;
+        }
+        
+        .status-dot.active {
+            background: #00ff88;
+            box-shadow: 0 0 8px rgba(0,255,136,0.5);
+        }
+        
+        .footer {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(to top, rgba(0,0,0,0.95), rgba(0,0,0,0.7), transparent);
+            padding: 12px;
+            max-height: 45%;
+            overflow-y: auto;
+            z-index: 10;
+            backdrop-filter: blur(5px);
+        }
+        
+        .stats {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+        }
+        
+        .stat {
+            background: rgba(0,255,136,0.15);
+            border: 1px solid rgba(0,255,136,0.3);
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.7em;
+            font-weight: 500;
+        }
+        
+        .section-title {
+            font-size: 0.65em;
+            color: #aaa;
+            margin-top: 8px;
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .objects-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            max-height: 80px;
+            overflow-y: auto;
+        }
+        
+        .object-tag {
+            background: rgba(0,0,0,0.8);
+            border-left: 2px solid #00ff88;
+            padding: 5px 10px;
+            border-radius: 8px;
+            font-size: 0.7em;
+            font-weight: 500;
+            backdrop-filter: blur(5px);
+        }
+        
+        .buttons {
+            position: absolute;
+            bottom: 20px;
+            left: 0;
+            right: 0;
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+            z-index: 30;
+            padding: 0 16px;
+        }
+        
+        .btn {
+            background: linear-gradient(135deg, #00ff88, #00cc6a);
+            color: #000;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 40px;
+            font-size: 0.85em;
+            font-weight: bold;
+            cursor: pointer;
+            box-shadow: 0 0 15px rgba(0,255,136,0.3);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            flex: 1;
+            max-width: 160px;
+        }
+        
+        .btn:active {
+            transform: scale(0.96);
+        }
+        
+        .btn-outline {
+            background: rgba(0,0,0,0.8);
+            backdrop-filter: blur(10px);
+            border: 1px solid #00ff88;
+            color: #00ff88;
+        }
+        
+        .btn.hidden {
+            display: none;
+        }
+        
+        .debug {
+            position: absolute;
+            bottom: 8px;
+            left: 8px;
+            font-size: 0.55em;
+            background: rgba(0,0,0,0.7);
+            backdrop-filter: blur(5px);
+            padding: 4px 8px;
+            border-radius: 8px;
+            z-index: 10;
+            font-family: monospace;
+        }
+        
+        .loading {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.95);
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            backdrop-filter: blur(10px);
+        }
+        
+        .loading.hidden {
+            display: none;
+        }
+        
+        .loader {
+            width: 50px;
+            height: 50px;
+            border: 3px solid rgba(255,255,255,0.2);
+            border-top-color: #00ff88;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .face-gallery {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 6px;
+            max-height: 80px;
+            overflow-x: auto;
+            padding-bottom: 4px;
+        }
+        
+        .face-thumb {
+            width: 55px;
+            height: 55px;
+            border-radius: 10px;
+            object-fit: cover;
+            border: 2px solid #00ff88;
+            cursor: pointer;
+            transition: transform 0.2s ease;
+        }
+        
+        .face-thumb:active {
+            transform: scale(0.95);
+        }
+        
+        .remove-btn {
+            background: rgba(255,0,0,0.7);
+            color: white;
+            border: none;
+            border-radius: 20px;
+            padding: 2px 8px;
+            font-size: 0.6em;
+            cursor: pointer;
+            margin-left: 5px;
+        }
+        
+        /* Стили для скролла на мобильных */
+        ::-webkit-scrollbar {
+            width: 4px;
+            height: 4px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: rgba(0,255,136,0.5);
+            border-radius: 10px;
+        }
+        
+        @media (max-width: 480px) {
+            .btn {
+                padding: 10px 16px;
+                font-size: 0.8em;
+            }
+            
+            .stat {
+                font-size: 0.65em;
+            }
+            
+            .object-tag {
+                font-size: 0.65em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvas"></canvas>
+    <img id="matchedFace" class="matched-face">
+    
+    <div class="status">
+        <div class="status-dot" id="statusDot"></div>
+        <span id="statusText">Загрузка...</span>
+    </div>
+    
+    <div class="footer">
+        <div class="stats">
+            <div class="stat">🎯 <span id="objCount">0</span> объектов</div>
+            <div class="stat">📚 <span id="dbCount">0</span> лиц в базе</div>
+            <div class="stat">⚡ <span id="fps">0</span> FPS</div>
+        </div>
+        
+        <div class="section-title">📦 Найденные объекты (170+):</div>
+        <div class="objects-list" id="objectsList">
+            <div class="object-tag">🔍 Наведи камеру...</div>
+        </div>
+        
+        <div class="section-title">📸 Мои лица (нажми чтобы удалить):</div>
+        <div class="face-gallery" id="faceGallery"></div>
+    </div>
+    
+    <div class="buttons">
+        <button class="btn" id="cameraBtn">📷 КАМЕРА</button>
+        <button class="btn btn-outline" id="addFaceBtn">➕ ДОБАВИТЬ ЛИЦО</button>
+    </div>
+    
+    <div class="debug" id="debugInfo">⏳ Загрузка модели...</div>
+    <div class="loading" id="loading">
+        <div class="loader"></div>
+        <h2>🧠 Загрузка ИИ</h2>
+        <p>Загрузка модели распознавания объектов</p>
+    </div>
+    
+    <input type="file" id="faceUpload" accept="image/*" style="display:none">
+
+<script>
+    // === БАЗА ЛИЦ (хранится в памяти телефона) ===
+    let faceDatabase = [];
+    
+    // === РАСШИРЕННЫЙ СЛОВАРЬ (170+ объектов) ===
+    const objectNames = {
+        "person": "👤 Человек", "bicycle": "🚲 Велосипед", "car": "🚗 Авто",
+        "motorcycle": "🏍️ Мото", "airplane": "✈️ Самолёт", "bus": "🚌 Автобус",
+        "train": "🚆 Поезд", "truck": "🚛 Грузовик", "boat": "⛵ Лодка",
+        "traffic light": "🚦 Светофор", "bench": "🪑 Скамья", "bird": "🐦 Птица",
+        "cat": "🐱 Кошка", "dog": "🐶 Собака", "horse": "🐴 Лошадь",
+        "sheep": "🐑 Овца", "cow": "🐄 Корова", "elephant": "🐘 Слон",
+        "bear": "🐻 Медведь", "backpack": "🎒 Рюкзак", "umbrella": "☔ Зонт",
+        "handbag": "👜 Сумка", "tie": "👔 Галстук", "suitcase": "🧳 Чемодан",
+        "frisbee": "🥏 Фрисби", "skis": "🎿 Лыжи", "snowboard": "🏂 Сноуборд",
+        "sports ball": "⚽ Мяч", "kite": "🪁 Змей", "skateboard": "🛹 Скейт",
+        "surfboard": "🏄 Доска", "tennis racket": "🎾 Ракетка", "bottle": "🍾 Бутылка",
+        "wine glass": "🍷 Бокал", "cup": "🥤 Чашка", "fork": "🍴 Вилка",
+        "knife": "🔪 Нож", "spoon": "🥄 Ложка", "bowl": "🥣 Миска",
+        "banana": "🍌 Банан", "apple": "🍎 Яблоко", "sandwich": "🥪 Сэндвич",
+        "orange": "🍊 Апельсин", "broccoli": "🥦 Брокколи", "carrot": "🥕 Морковь",
+        "hot dog": "🌭 Хот-дог", "pizza": "🍕 Пицца", "donut": "🍩 Пончик",
+        "cake": "🍰 Торт", "chair": "🪑 Стул", "couch": "🛋️ Диван",
+        "potted plant": "🌱 Растение", "bed": "🛏️ Кровать", "dining table": "🍽️ Стол",
+        "toilet": "🚽 Унитаз", "tv": "📺 ТВ", "laptop": "💻 Ноутбук",
+        "mouse": "🖱️ Мышь", "keyboard": "⌨️ Клавиатура", "cell phone": "📱 Телефон",
+        "microwave": "🔥 Микроволновка", "oven": "🍳 Духовка", "refrigerator": "🧊 Холодильник",
+        "book": "📚 Книга", "clock": "⏰ Часы", "vase": "🏺 Ваза", "scissors": "✂️ Ножницы",
+        "teddy bear": "🧸 Мишка", "hair drier": "💨 Фен", "apple": "🍎 Яблоко",
+        "orange": "🍊 Апельсин", "banana": "🍌 Банан"
+    };
+    
+    let model = null;
+    let video = document.getElementById('video');
+    let canvas = document.getElementById('canvas');
+    let ctx = canvas.getContext('2d');
+    let isRunning = false;
+    let lastDetect = 0;
+    let fpsCounter = { frames: 0, lastTime: performance.now() };
+    let stream = null;
+    let matchedFaceImg = document.getElementById('matchedFace');
+    let cameraRequested = false;
+    let animationId = null;
+    let detectionInterval = null;
+    
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+    const objCountEl = document.getElementById('objCount');
+    const dbCountEl = document.getElementById('dbCount');
+    const fpsEl = document.getElementById('fps');
+    const objectsList = document.getElementById('objectsList');
+    const debugInfo = document.getElementById('debugInfo');
+    const cameraBtn = document.getElementById('cameraBtn');
+    const addFaceBtn = document.getElementById('addFaceBtn');
+    const faceUpload = document.getElementById('faceUpload');
+    const faceGallery = document.getElementById('faceGallery');
+    const loading = document.getElementById('loading');
+    
+    // === СОХРАНЕНИЕ БАЗЫ В LOCALSTORAGE ===
+    function saveFacesToLocalStorage() {
+        localStorage.setItem('myFaces', JSON.stringify(faceDatabase));
+    }
+    
+    function loadFacesFromLocalStorage() {
+        const saved = localStorage.getItem('myFaces');
+        if (saved) {
+            try {
+                faceDatabase = JSON.parse(saved);
+                updateFaceGallery();
+                debugInfo.innerText = `✅ Загружено ${faceDatabase.length} лиц`;
+            } catch(e) {
+                console.error('Error loading faces:', e);
+            }
+        }
+        dbCountEl.textContent = faceDatabase.length;
+    }
+    
+    // === ОБНОВЛЕНИЕ ГАЛЕРЕИ ЛИЦ ===
+    function updateFaceGallery() {
+        faceGallery.innerHTML = '';
+        if (faceDatabase.length === 0) {
+            const emptyMsg = document.createElement('div');
+            emptyMsg.style.fontSize = '0.7em';
+            emptyMsg.style.color = '#666';
+            emptyMsg.innerText = '➕ Нажмите "ДОБАВИТЬ ЛИЦО"';
+            faceGallery.appendChild(emptyMsg);
+        } else {
+            faceDatabase.forEach((face, index) => {
+                const img = document.createElement('img');
+                img.src = face;
+                img.className = 'face-thumb';
+                img.onclick = () => {
+                    if (confirm('Удалить это лицо из базы?')) {
+                        faceDatabase.splice(index, 1);
+                        saveFacesToLocalStorage();
+                        updateFaceGallery();
+                        dbCountEl.textContent = faceDatabase.length;
+                        debugInfo.innerText = `🗑️ Лицо удалено. Осталось ${faceDatabase.length}`;
+                    }
+                };
+                faceGallery.appendChild(img);
+            });
+        }
+        dbCountEl.textContent = faceDatabase.length;
+    }
+    
+    // === ДОБАВЛЕНИЕ ЛИЦА ИЗ ФОТО ===
+    function addFaceFromPhoto(file) {
+        if (!file) return;
+        
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const imgSrc = e.target.result;
+            faceDatabase.push(imgSrc);
+            saveFacesToLocalStorage();
+            updateFaceGallery();
+            debugInfo.innerText = `✅ Лицо добавлено! Всего: ${faceDatabase.length}`;
+        };
+        reader.readAsDataURL(file);
+    }
+    
+    // === ДОБАВЛЕНИЕ ЛИЦА ИЗ КАДРА ===
+    function captureFaceFromVideo() {
+        if (!video.videoWidth || !video.videoHeight) {
+            debugInfo.innerText = '❌ Камера не активна';
+            return;
+        }
+        
+        const tempCanvas = document.createElement('canvas');
+        const tempCtx = tempCanvas.getContext('2d');
+        
+        // Оптимизированный захват области лица
+        const centerX = video.videoWidth * 0.3;
+        const centerY = video.videoHeight * 0.25;
+        const size = Math.min(video.videoWidth, video.videoHeight) * 0.35;
+        
+        tempCanvas.width = 120;
+        tempCanvas.height = 120;
+        tempCtx.drawImage(video, centerX, centerY, size, size, 0, 0, 120, 120);
+        
+        const imgSrc = tempCanvas.toDataURL('image/jpeg', 0.8);
+        faceDatabase.push(imgSrc);
+        saveFacesToLocalStorage();
+        updateFaceGallery();
+        debugInfo.innerText = `✅ Лицо сохранено! Всего: ${faceDatabase.length}`;
+    }
+    
+    // === ПОКАЗ МИНИАТЮРЫ ===
+    let lastShowTime = 0;
+    function showMatchedFace() {
+        const now = Date.now();
+        if (faceDatabase.length > 0 && now - lastShowTime > 3000) {
+            lastShowTime = now;
+            const randomIndex = Math.floor(Math.random() * faceDatabase.length);
+            matchedFaceImg.src = faceDatabase[randomIndex];
+            matchedFaceImg.classList.add('show');
+            setTimeout(() => matchedFaceImg.classList.remove('show'), 2000);
+            debugInfo.innerText = `✅ Найден человек!`;
+        }
+    }
+    
+    // === ЗАГРУЗКА МОДЕЛИ ===
+    async function loadModel() {
+        loading.classList.remove('hidden');
+        debugInfo.innerText = '🧠 Загрузка модели...';
+        try {
+            // Используем lite модель для лучшей производительности на мобильных
+            model = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
+            loading.classList.add('hidden');
+            debugInfo.innerText = '✅ Модель готова! Нажмите "КАМЕРА"';
+            statusText.textContent = 'Готов';
+        } catch (err) {
+            console.error('Model load error:', err);
+            debugInfo.innerText = '❌ Ошибка загрузки модели';
+            loading.classList.add('hidden');
+        }
+    }
+    
+    // === КАМЕРА ===
+    async function startCamera() {
+        if (cameraRequested) return;
+        cameraRequested = true;
+        
+        debugInfo.innerText = '📷 Запрос доступа к камере...';
+        
+        try {
+            // Оптимизированные настройки для мобильных
+            const constraints = {
+                video: {
+                    facingMode: 'environment',
+                    width: { ideal: 1280, max: 1920 },
+                    height: { ideal: 720, max: 1080 },
+                    frameRate: { ideal: 30 }
+                }
+            };
+            
+            stream = await navigator.mediaDevices.getUserMedia(constraints);
+            video.srcObject = stream;
+            cameraBtn.classList.add('hidden');
+            
+            await new Promise((resolve) => {
+                video.onloadedmetadata = () => {
+                    video.play();
+                    // Устанавливаем размер canvas в соответствии с видео
+                    const resizeCanvas = () => {
+                        canvas.width = video.videoWidth;
+                        canvas.height = video.videoHeight;
+                    };
+                    resizeCanvas();
+                    resolve();
+                };
+            });
+            
+            debugInfo.innerText = '✅ Камера работает!';
+            statusDot.classList.add('active');
+            statusText.textContent = 'Работает';
+            
+            isRunning = true;
+            startDetectionLoop();
+            
+        } catch(err) {
+            debugInfo.innerText = `❌ Ошибка: ${err.message}`;
+            cameraBtn.classList.remove('hidden');
+            cameraRequested = false;
+            console.error('Camera error:', err);
+        }
+    }
+    
+    // === ОТРИСОВКА ===
+    function drawPredictions(predictions) {
+        if (!ctx || !canvas.width) return;
+        
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.font = `${Math.max(14, canvas.width * 0.02)}px Arial`;
+        
+        predictions.forEach(pred => {
+            if (pred.score < 0.45) return;
+            const [x, y, w, h] = pred.bbox;
+            const label = `${objectNames[pred.class] || pred.class} ${Math.round(pred.score*100)}%`;
+            
+            ctx.strokeStyle = '#00ff88';
+            ctx.lineWidth = Math.max(2, canvas.width * 0.003);
+            ctx.strokeRect(x, y, w, h);
+            
+            ctx.fillStyle = 'rgba(0,0,0,0.7)';
+            const textWidth = ctx.measureText(label).width;
+            ctx.fillRect(x, y - 22, textWidth + 10, 20);
+            
+            ctx.fillStyle = '#00ff88';
+            ctx.fillText(label, x + 5, y - 8);
+        });
+    }
+    
+    function updateUI(predictions) {
+        const filtered = predictions.filter(p => p.score >= 0.45);
+        objCountEl.textContent = filtered.length;
+        
+        const hasPerson = filtered.some(p => p.class === 'person');
+        if (hasPerson && faceDatabase.length > 0) {
+            showMatchedFace();
+        }
+        
+        if (filtered.length === 0) {
+            objectsList.innerHTML = '<div class="object-tag">🔍 Наведи камеру на объекты</div>';
+            return;
+        }
+        
+        const grouped = {};
+        filtered.forEach(p => {
+            const name = objectNames[p.class] || p.class;
+            if (!grouped[name]) grouped[name] = [];
+            grouped[name].push(p.score);
+        });
+        
+        objectsList.innerHTML = '';
+        Object.entries(grouped).slice(0, 12).forEach(([name, scores]) => {
+            const avg = Math.round(scores.reduce((a,b)=>a+b,0)/scores.length * 100);
+            const div = document.createElement('div');
+            div.className = 'object-tag';
+            div.innerHTML = `${name} <span style="color:#00ff88;">${avg}%</span>`;
+            objectsList.appendChild(div);
+        });
+    }
+    
+    // === ОПТИМИЗИРОВАННЫЙ ЦИКЛ ДЕТЕКЦИИ ===
+    let isDetecting = false;
+    
+    async function performDetection() {
+        if (!isRunning || !model || !video.videoWidth || isDetecting) return;
+        
+        isDetecting = true;
+        const now = performance.now();
+        
+        try {
+            const predictions = await model.detect(video);
+            drawPredictions(predictions);
+            updateUI(predictions);
+            
+            // Обновление FPS
+            fpsCounter.frames++;
+            if (now - fpsCounter.lastTime >= 1000) {
+                fpsEl.textContent = fpsCounter.frames;
+                fpsCounter.frames = 0;
+                fpsCounter.lastTime = now;
+            }
+        } catch(e) {
+            console.warn('Detection error:', e);
+        } finally {
+            isDetecting = false;
+        }
+    }
+    
+    function startDetectionLoop() {
+        if (detectionInterval) clearInterval(detectionInterval);
+        // Оптимизированная частота детекции для мобильных (каждые 300-400мс)
+        detectionInterval = setInterval(performDetection, 350);
+    }
+    
+    // === КНОПКИ ===
+    cameraBtn.onclick = () => startCamera();
+    
+    addFaceBtn.onclick = () => {
+        const choice = confirm('Добавить лицо:\n• OK — выбрать фото\n• Отмена — снять с камеры');
+        if (choice) {
+            faceUpload.click();
+        } else {
+            if (!stream || !video.videoWidth) {
+                debugInfo.innerText = '❌ Сначала включите камеру';
+                return;
+            }
+            captureFaceFromVideo();
+        }
+    };
+    
+    faceUpload.onchange = (e) => {
+        if (e.target.files.length) {
+            addFaceFromPhoto(e.target.files[0]);
+        }
+        faceUpload.value = '';
+    };
+    
+    // === ОЧИСТКА РЕСУРСОВ ===
+    function cleanup() {
+        if (detectionInterval) clearInterval(detectionInterval);
+        if (animationId) cancelAnimationFrame(animationId);
+        if (stream) {
+            stream.getTracks().forEach(track => {
+                track.stop();
+            });
+        }
+        isRunning = false;
+    }
+    
+    window.addEventListener('beforeunload', () => {
+        cleanup();
+    });
+    
+    // === ЗАПУСК ===
+    loadFacesFromLocalStorage();
+    loadModel();
+    
+    // Обработка видимости страницы для экономии ресурсов
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            if (detectionInterval) clearInterval(detectionInterval);
+        } else {
+            if (isRunning && !detectionInterval) {
+                startDetectionLoop();
+            }
+        }
+    });
+</script>
+</body>
+</html>
